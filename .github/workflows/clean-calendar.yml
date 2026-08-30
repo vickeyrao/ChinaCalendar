@@ -1,0 +1,57 @@
+# ============================================================
+#  ChinaCalendar 自动清洗工作流
+#  放位置： fork 仓库的  .github/workflows/clean-calendar.yml
+#  作用： 每天定时从上游已发布的 ICS 拉取最新版，
+#         删掉 『』「」 四种括号，提交回本仓库 master，
+#         GitHub Pages 自动以“干净版”对外提供。
+#  前置： 仓库 Settings → Pages 选 Deploy from a branch → master → /(root)
+#        仓库 Settings → Actions 选 Allow all actions
+# ============================================================
+name: Sync & Clean ChinaCalendar ICS
+
+on:
+  schedule:
+    - cron: '17 3 * * *'        # 每天 UTC 03:17 跑一次（避开整点高峰）
+  workflow_dispatch: {}         # 允许在 Actions 页面手动触发
+
+permissions:
+  contents: write               # 允许工作流 push 回本仓库
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 本 fork 仓库
+        uses: actions/checkout@v4
+
+      - name: 拉取上游 ICS 并删除 『』「」
+        env:
+          BASE: https://yangh9.github.io/ChinaCalendar
+        run: |
+          set -e
+          export LC_ALL=C.UTF-8
+          FILES="calendar.ics calendar_1.ics cal_holiday.ics cal_holiday_1.ics \
+                 cal_festival.ics cal_solarTerm.ics cal_lunar.ics cal_trunkBranch.ics \
+                 countdown_holiday.ics countdown_ChineseNewYear.ics"
+          for f in $FILES; do
+            if curl -fsSL --compressed "$BASE/$f" -o "$f.tmp"; then
+              # perl -CSD：以 UTF-8 读写，安全删除多字节中文字符
+              perl -CSD -i -pe 's/[『』「」]//g' "$f.tmp"
+              mv "$f.tmp" "$f"
+              echo "cleaned: $f"
+            else
+              echo "skip (not found): $f"
+            fi
+          done
+
+      - name: 提交并推送回 master
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "无变化，跳过提交"
+          else
+            git commit -m "auto: strip 『』「」 from ICS"
+            git push
+          fi
