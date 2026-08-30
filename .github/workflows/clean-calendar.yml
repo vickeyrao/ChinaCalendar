@@ -1,8 +1,9 @@
 # ============================================================
-#  ChinaCalendar 自动清洗（字节级删除版，仍从 master 部署 Pages）
+#  ChinaCalendar 自动清洗（python3 版，仍从 master 部署 Pages）
 #  放位置： fork 仓库的  .github/workflows/clean-calendar.yml
 #  配套：   Settings → Pages → Deploy from a branch → master → /(root)
-#  修复点： 用 LC_ALL=C + perl \xNN 字节删除，绕开 UTF-8 解码坑
+#  修复点： 之前 perl 字节模式对『』(高位字节0x90/0x91)匹配失败，
+#           改用 python3 按 UTF-8 码点删除，最稳。
 # ============================================================
 name: Sync & Clean ChinaCalendar ICS
 
@@ -21,7 +22,7 @@ jobs:
       - name: Checkout 本 fork 仓库
         uses: actions/checkout@v4
 
-      - name: 拉取上游 ICS 并删除 『』「」（字节级，带诊断）
+      - name: 拉取上游 ICS 并用 python3 删除 『』「」（带诊断）
         env:
           BASE: https://yangh9.github.io/ChinaCalendar
         run: |
@@ -35,10 +36,18 @@ jobs:
                       --compressed "$BASE/$f" 2>/dev/null || echo "000")
             if [ "$code" = "200" ]; then
               before=$(wc -m < "$f.tmp")
-              # 字节级删除：『=E3 80 90  』=E3 80 91  「=E3 80 8C  」=E3 80 8D
-              LC_ALL=C perl -i -pe \
-                's/\xe3\x80\x90//g; s/\xe3\x80\x91//g; s/\xe3\x80\x8c//g; s/\xe3\x80\x8d//g' \
-                "$f.tmp"
+              python3 -c '
+import sys
+p = sys.argv[1]
+with open(p, encoding="utf-8", errors="ignore") as fh:
+    s = fh.read()
+b = len(s)
+for ch in ("\u3010", "\u3011", "\u300c", "\u300d"):   # 『 』 「 」
+    s = s.replace(ch, "")
+with open(p, "w", encoding="utf-8") as fh:
+    fh.write(s)
+print("cleaned:", b, "->", len(s), "(删了", b - len(s), "个字符)")
+' "$f.tmp"
               after=$(wc -m < "$f.tmp")
               mv "$f.tmp" "$f"
               echo "OK   $f  http=$code  chars: $before -> $after (删了 $((before-after)) 个)"
