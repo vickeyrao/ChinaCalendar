@@ -1,8 +1,8 @@
 # ============================================================
-#  ChinaCalendar 自动清洗（诊断+重试版，仍从 master 部署 Pages）
+#  ChinaCalendar 自动清洗（字节级删除版，仍从 master 部署 Pages）
 #  放位置： fork 仓库的  .github/workflows/clean-calendar.yml
 #  配套：   Settings → Pages → Deploy from a branch → master → /(root)
-#  用途：   每天拉上游最新 ICS，删 『』「」，commit 回 master
+#  修复点： 用 LC_ALL=C + perl \xNN 字节删除，绕开 UTF-8 解码坑
 # ============================================================
 name: Sync & Clean ChinaCalendar ICS
 
@@ -21,7 +21,7 @@ jobs:
       - name: Checkout 本 fork 仓库
         uses: actions/checkout@v4
 
-      - name: 拉取上游 ICS 并删除 『』「」（带诊断）
+      - name: 拉取上游 ICS 并删除 『』「」（字节级，带诊断）
         env:
           BASE: https://yangh9.github.io/ChinaCalendar
         run: |
@@ -35,7 +35,10 @@ jobs:
                       --compressed "$BASE/$f" 2>/dev/null || echo "000")
             if [ "$code" = "200" ]; then
               before=$(wc -m < "$f.tmp")
-              perl -CSD -i -pe 's/[『』「」]//g' "$f.tmp"
+              # 字节级删除：『=E3 80 90  』=E3 80 91  「=E3 80 8C  」=E3 80 8D
+              LC_ALL=C perl -i -pe \
+                's/\xe3\x80\x90//g; s/\xe3\x80\x91//g; s/\xe3\x80\x8c//g; s/\xe3\x80\x8d//g' \
+                "$f.tmp"
               after=$(wc -m < "$f.tmp")
               mv "$f.tmp" "$f"
               echo "OK   $f  http=$code  chars: $before -> $after (删了 $((before-after)) 个)"
@@ -53,7 +56,7 @@ jobs:
           echo "=== git status ==="
           git status --short
           if git diff --cached --quiet; then
-            echo "=== 仍无变化：请检查上面是否有 FAIL（curl 没拉到上游） ==="
+            echo "=== 仍无变化 ==="
           else
             git commit -m "auto: strip 『』「」 from ICS"
             git push
